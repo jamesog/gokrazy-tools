@@ -6,6 +6,7 @@ import (
 	"archive/tar"
 	"bufio"
 	"context"
+	"debug/elf"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -1815,8 +1816,8 @@ func (pack *Pack) logic(programName string) error {
 }
 
 // kernelGoarch returns the GOARCH value that corresponds to the provided
-// vmlinuz header. It returns one of "arm64", "arm", "amd64", or the empty
-// string if not detected.
+// vmlinuz header. It returns one of "arm64", "arm", "amd64", "mips",
+// "mips64", or the empty string if not detected.
 func kernelGoarch(hdr []byte) string {
 	// Some constants from the file(1) command's magic.
 	const (
@@ -1838,6 +1839,27 @@ func kernelGoarch(hdr []byte) string {
 	}
 	if len(hdr) >= arm64MagicOffset+2 && binary.LittleEndian.Uint16(hdr[x86MagicOffset:]) == x86Magic {
 		return "amd64" // we'll assume 386 is unsupported
+	}
+	if hdr[0] == '\x7f' && hdr[1] == 'E' && hdr[2] == 'L' && hdr[3] == 'F' {
+		// ELF e_machine field header location: https://en.wikipedia.org/wiki/Executable_and_Linkable_Format#File_header
+		const e_machine = 0x12
+
+		class := elf.Class(hdr[elf.EI_CLASS])
+		var mach elf.Machine
+
+		switch elf.Data(hdr[elf.EI_DATA]) {
+		case elf.ELFDATA2MSB:
+			mach = elf.Machine(binary.BigEndian.Uint16(hdr[e_machine : e_machine+2]))
+		case elf.ELFDATA2LSB:
+			mach = elf.Machine(binary.LittleEndian.Uint16(hdr[e_machine : e_machine+2]))
+		}
+
+		if class == elf.ELFCLASS32 && mach == elf.EM_MIPS {
+			return "mips"
+		}
+		if class == elf.ELFCLASS64 && mach == elf.EM_MIPS {
+			return "mips64"
+		}
 	}
 	return ""
 }
